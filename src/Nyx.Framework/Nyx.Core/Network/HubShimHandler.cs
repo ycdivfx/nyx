@@ -1,0 +1,223 @@
+﻿/*
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software Foundation,
+ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+ *
+ * The Original Code is Copyright (C) 2016 You can do it! VFX & JDBGraphics
+ * All rights reserved.
+ */
+using System;
+using System.Linq;
+using System.Reactive.Concurrency;
+using System.Reactive.Disposables;
+using System.Reactive.Linq;
+using System.Reactive.Subjects;
+using NetMQ;
+using NetMQ.Monitoring;
+using NetMQ.Sockets;
+using NLog;
+using Poller = NetMQ.Poller;
+
+namespace Nyx.Core.Network
+{
+    internal class HubShimHandler : IShimHandler, IDisposable
+    {
+        private readonly NetMQContext _context;
+        private readonly ISubject<Tuple<byte[], INyxMessage>> _messageSubject;
+        private readonly int _port;
+        private readonly CompositeDisposable _disposables;
+        private Poller _poller;
+        private PublisherSocket _publisherSocket;
+        private NetMQTimer _heartbeatTimer;
+        private RouterSocket _responseSocket;
+        private NetMQMonitor _monitor1;
+        private readonly Logger _logger;
+        private NetMQMonitor _monitor2;
+
+        public HubShimHandler(NetMQContext context, ISubject<Tuple<byte[], INyxMessage>> messageSubject, int port)
+        {
+            _context = context;
+            _messageSubject = messageSubject;
+            _port = port;
+            _disposables = new CompositeDisposable();
+            _logger = LogManager.GetCurrentClassLogger();
+        }
+
+        void IShimHandler.Run(PairSocket shim)
+        {
+            _poller = new Poller();
+            // Listen to actor dispose
+            _disposables.Add(Observable.FromEventPattern<NetMQSocketEventArgs>(e => shim.ReceiveReady += e, e => shim.ReceiveReady -= e)
+                .Select(e => e.EventArgs)
+                .ObserveOn(Scheduler.CurrentThread)
+                .Subscribe(OnShimReady));
+
+            _poller.AddSocket(shim);
+
+            _publisherSocket = _context.CreatePublisherSocket();
+            _responseSocket = _context.CreateRouterSocket();
+            //SetupMonitor();
+
+            // To avoid crashes if the queue builds up too fast.
+            _publisherSocket.Options.SendHighWatermark = 1000;
+            _publisherSocket.Options.TcpKeepalive = true;
+            _publisherSocket.Options.TcpKeepaliveIdle = TimeSpan.FromSeconds(5);
+            _publisherSocket.Options.TcpKeepaliveInterval = TimeSpan.FromSeconds(1);
+            // Number of network hops to jump, default is 1, which means local network.
+            //_publisherSocket.Options.MulticastHops = 100;
+            _publisherSocket.Bind($"tcp://*:{_port + 1}");
+            _poller.AddSocket(_publisherSocket);
+            _disposables.Add(_publisherSocket);
+
+            _responseSocket.Bind($"tcp://*:{_port}");
+            _disposables.Add(Observable.FromEventPattern<NetMQSocketEventArgs>(
+                e => _responseSocket.ReceiveReady += e, e => _responseSocket.ReceiveReady -= e)
+                .Select(e => e.EventArgs)
+                .ObserveOn(Scheduler.CurrentThread)
+                .Subscribe(e =>
+                {
+                    try
+                    {
+                        var msg = e.Socket.ReceiveMultipartMessage();
+                        // Ignore messages that have less than 3 frames or no empty second frame.
+                        var address = msg.First();
+                        var data = msg.Last().ConvertToString();
+                        var nyxMsg = new NyxMessage().FromDefault(data);
+                        _messageSubject.OnNext(new Tuple<byte[], INyxMessage>(address.ToByteArray(), nyxMsg));
+                    }
+                    catch (Exception ex)
+                    {
+                        _messageSubject.OnError(ex);
+                    }
+                }));
+
+            _poller.AddSocket(_responseSocket);
+            _disposables.Add(_responseSocket);
+
+            _heartbeatTimer = new NetMQTimer(TimeSpan.FromSeconds(2));
+            _disposables.Add(Observable.FromEventPattern<NetMQTimerEventArgs>(e => _heartbeatTimer.Elapsed += e, e => _heartbeatTimer.Elapsed -= e)
+                .Select(e => e.EventArgs)
+                .Subscribe(OnTimeoutElapsed));
+            _poller.AddTimer(_heartbeatTimer);
+
+            _heartbeatTimer.Reset();
+            shim.SignalOK();
+
+            _disposables.Add(Disposable.Create(() =>
+            {
+                _heartbeatTimer.Enable = false;
+                _poller?.Cancel();
+            }));
+
+            _poller.PollTillCancelled();
+        }
+
+        private void SetupMonitor()
+        {
+            _monitor1 = new NetMQMonitor(_context, _publisherSocket, "inproc://#monitor1", SocketEvents.All);
+            _disposables.Add(
+                Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor1, "Connected")
+                .Select(e => new { Event = "Connected", e })
+                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor1, nameof(_monitor1.Listening)).Select(e => new { Event = "Listening", e }))
+                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor1, nameof(_monitor1.Accepted)).Select(e => new { Event = "Accepted", e }))
+                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor1, nameof(_monitor1.Closed)).Select(e => new { Event = "Closed", e }))
+                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor1, nameof(_monitor1.Disconnected)).Select(e => new { Event = "Disconnected", e }))
+                .Do(e => _logger.Info("Monitor socket: {0}, {1}", e.Event, e.e.EventArgs.Address))
+                .Subscribe()
+                );
+            _disposables.Add(
+                Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor1, nameof(_monitor1.AcceptFailed))
+                .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor1, nameof(_monitor1.ConnectDelayed)))
+                .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor1, nameof(_monitor1.CloseFailed)))
+                .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor1, nameof(_monitor1.BindFailed)))
+                .Do(e => _logger.Error("Monitor error socket: {0}, {1}", e.EventArgs.ErrorCode, e.EventArgs.Address))
+                .Subscribe()
+                );
+            _disposables.Add(
+                Observable.FromEventPattern<NetMQMonitorIntervalEventArgs>(_monitor1, nameof(_monitor1.ConnectRetried))
+                .Do(e => _logger.Info("Monitor retry socket: {0}, {1}", e.EventArgs.Interval, e.EventArgs.Address))
+                .Subscribe()
+                );
+            _monitor1.AttachToPoller(_poller);
+            _disposables.Add(_monitor1);
+
+            _monitor2 = new NetMQMonitor(_context, _responseSocket, "inproc://#monitor2", SocketEvents.All);
+            _disposables.Add(
+                Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor2, "Connected")
+                .Select(e => new { Event = "Connected", e })
+                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor2, nameof(_monitor2.Listening)).Select(e => new { Event = "Listening", e }))
+                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor2, nameof(_monitor2.Accepted)).Select(e => new { Event = "Accepted", e }))
+                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor2, nameof(_monitor2.Closed)).Select(e => new { Event = "Closed", e }))
+                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor2, nameof(_monitor2.Disconnected)).Select(e => new { Event = "Disconnected", e }))
+                .Do(e => _logger.Info("Monitor socket: {0}, {1}", e.Event, e.e.EventArgs.Address))
+                .Subscribe()
+                );
+            _disposables.Add(
+                Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor2, nameof(_monitor2.AcceptFailed))
+                .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor2, nameof(_monitor2.ConnectDelayed)))
+                .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor2, nameof(_monitor2.CloseFailed)))
+                .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor2, nameof(_monitor2.BindFailed)))
+                .Do(e => _logger.Error("Monitor error socket: {0}, {1}", e.EventArgs.ErrorCode, e.EventArgs.Address))
+                .Subscribe()
+                );
+            _disposables.Add(
+                Observable.FromEventPattern<NetMQMonitorIntervalEventArgs>(_monitor2, nameof(_monitor2.ConnectRetried))
+                .Do(e => _logger.Info("Monitor retry socket: {0}, {1}", e.EventArgs.Interval, e.EventArgs.Address))
+                .Subscribe()
+                );
+            _monitor2.AttachToPoller(_poller);
+            _disposables.Add(_monitor2);
+        }
+
+        private void OnTimeoutElapsed(NetMQTimerEventArgs args)
+        {
+            _publisherSocket.SendFrame(Heartbeat.CoreHearbeatTopic);
+        }
+
+        private void OnShimReady(NetMQSocketEventArgs args)
+        {
+            var msg = args.Socket.ReceiveMultipartMessage();
+            var cmd = msg.First.ConvertToString();
+            if (cmd == NetMQActor.EndShimMessage)
+            {
+                _disposables.Dispose();
+                return;
+            }
+            if (msg.FrameCount <= 1) return;
+            if (cmd == "broadcast" && msg.FrameCount == 3)
+            {
+                var nmqMsg = new NetMQMessage();
+                nmqMsg.Append(msg[1].ConvertToString());
+                nmqMsg.AppendEmptyFrame();
+                nmqMsg.Append(msg[2].ConvertToString());
+                _publisherSocket.SendMultipartMessage(nmqMsg);
+            }
+            else if (cmd == "response")
+            {
+                var nmqMsg = new NetMQMessage();
+                for (var i = 1; i < msg.FrameCount; i++)
+                    nmqMsg.Append(msg[i]);
+                _responseSocket.SendMultipartMessage(nmqMsg);
+            }
+        }
+
+        /// <summary>
+        /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
+        /// </summary>
+        public void Dispose()
+        {
+            if (!_disposables.IsDisposed)
+                _disposables.Dispose();
+        }
+    }
+}

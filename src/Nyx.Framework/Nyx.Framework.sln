@@ -1,0 +1,30 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.29411.108
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nyx.Core", "Nyx.Core\Nyx.Core.csproj", "{A45F54FC-8C1B-4967-97BC-D45466075226}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Core", "Core", "{EDB31B20-A537-4E88-A2DD-E786EACA21A1}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A45F54FC-8C1B-4967-97BC-D45466075226}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A45F54FC-8C1B-4967-97BC-D45466075226}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A45F54FC-8C1B-4967-97BC-D45466075226}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A45F54FC-8C1B-4967-97BC-D45466075226}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{A45F54FC-8C1B-4967-97BC-D45466075226} = {EDB31B20-A537-4E88-A2DD-E786EACA21A1}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {685C0575-4D7E-4603-AB66-6BCAEB8DE141}
+	EndGlobalSection
+EndGlobal
