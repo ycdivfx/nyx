@@ -59,7 +59,7 @@ namespace Nyx.Core.Network
 
             _publisherSocket = new PublisherSocket();
             _responseSocket = new RouterSocket();
-#if DEBUG
+#if MONITOR
             var monitor1 = new NetMQMonitor(_publisherSocket, "inproc://#monitor1", SocketEvents.All);
             _ = Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(monitor1, "Connected")
                 .Select(e => new { Event = "Connected", e })
@@ -147,11 +147,13 @@ namespace Nyx.Core.Network
 
             _poller.Run();
 
+#if MONITOR
             if(monitor1 != null)
             {
                 monitor1.DetachFromPoller();
                 monitor2.DetachFromPoller();
             }
+#endif
             _poller.Remove(_responseSocket);
             _poller.Remove(_publisherSocket);
             _poller.Remove(heartbeatTimer);
@@ -191,7 +193,7 @@ namespace Nyx.Core.Network
             }
         }
 
-        #region IDisposable Support
+#region IDisposable Support
         private bool disposedValue = false; // To detect redundant calls
 
         protected virtual void Dispose(bool disposing)
@@ -217,7 +219,7 @@ namespace Nyx.Core.Network
             // Do not change this code. Put cleanup code in Dispose(bool disposing) above.
             Dispose(true);
         }
-        #endregion
+#endregion
 
     }
 }

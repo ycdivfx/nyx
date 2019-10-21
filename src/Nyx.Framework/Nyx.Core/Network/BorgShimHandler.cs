@@ -37,7 +37,6 @@ namespace Nyx.Core.Network
         private NetMQPoller _poller;
         private SubscriberSocket _subscriberSocket;
         private readonly Logger _logger;
-        private NetMQMonitor _monitor;
 
         public static BorgShimHandler Create(ISubject<INyxMessage> messageSubject,
             string address, int port)
@@ -72,27 +71,27 @@ namespace Nyx.Core.Network
             _subscriberSocket.Options.TcpKeepaliveIdle = TimeSpan.FromSeconds(5);
             _subscriberSocket.Options.TcpKeepaliveInterval = TimeSpan.FromSeconds(1);
 
-#if DEBUG
-            _monitor = new NetMQMonitor(_subscriberSocket, "inproc://#monitor", SocketEvents.All);
+#if MONITOR
+            var monitor = new NetMQMonitor(_subscriberSocket, "inproc://#monitor", SocketEvents.All);
             _ =
-                Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor, "Connected")
+                Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(monitor, "Connected")
                 .Select(e => new { Event = "Connected", e })
-                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor, nameof(_monitor.Listening)).Select(e => new { Event = "Listening", e }))
-                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor, nameof(_monitor.Accepted)).Select(e => new { Event = "Accepted", e }))
-                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor, nameof(_monitor.Closed)).Select(e => new { Event = "Closed", e }))
-                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor, nameof(_monitor.Disconnected)).Select(e => new { Event = "Disconnected", e }))
+                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(monitor, nameof(monitor.Listening)).Select(e => new { Event = "Listening", e }))
+                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(monitor, nameof(monitor.Accepted)).Select(e => new { Event = "Accepted", e }))
+                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(monitor, nameof(monitor.Closed)).Select(e => new { Event = "Closed", e }))
+                .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(monitor, nameof(monitor.Disconnected)).Select(e => new { Event = "Disconnected", e }))
                 .Do(e => _logger.Info("Monitor socket: {0}, {1}", e.Event, e.e.EventArgs.Address))
                 .Subscribe();
-            _ = Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor, nameof(_monitor.AcceptFailed))
-                .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor, nameof(_monitor.ConnectDelayed)))
-                .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor, nameof(_monitor.CloseFailed)))
-                .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor, nameof(_monitor.BindFailed)))
+            _ = Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(monitor, nameof(monitor.AcceptFailed))
+                .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(monitor, nameof(monitor.ConnectDelayed)))
+                .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(monitor, nameof(monitor.CloseFailed)))
+                .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(monitor, nameof(monitor.BindFailed)))
                 .Do(e => _logger.Error("Monitor error socket: {0}, {1}", e.EventArgs.ErrorCode, e.EventArgs.Address))
                 .Subscribe();
-            _ = Observable.FromEventPattern<NetMQMonitorIntervalEventArgs>(_monitor, nameof(_monitor.ConnectRetried))
+            _ = Observable.FromEventPattern<NetMQMonitorIntervalEventArgs>(monitor, nameof(monitor.ConnectRetried))
                 .Do(e => _logger.Info("Monitor retry socket: {0}, {1}", e.EventArgs.Interval, e.EventArgs.Address))
                 .Subscribe();
-            _monitor.AttachToPoller(_poller);
+            monitor.AttachToPoller(_poller);
 #endif
 
             _ = Observable.FromEventPattern<NetMQSocketEventArgs>(
@@ -119,12 +118,14 @@ namespace Nyx.Core.Network
             // Cleanup stuff after stopping
             _poller.Remove(_subscriberSocket);
             _poller.Remove(shim);
-            if (_monitor != null)
+#if MONITOR
+            if (monitor != null)
             {
-                _monitor.DetachFromPoller();
-                _monitor.Dispose();
-                _monitor = null;
+                monitor.DetachFromPoller();
+                monitor.Dispose();
+                monitor = null;
             }
+#endif
             _poller.Dispose();
         }
 
@@ -178,7 +179,7 @@ namespace Nyx.Core.Network
             }
         }
 
-        #region IDisposable Support
+#region IDisposable Support
         private bool disposedValue = false; // To detect redundant calls
 
         protected virtual void Dispose(bool disposing)
@@ -189,7 +190,6 @@ namespace Nyx.Core.Network
                 {
                     _poller?.Dispose();
                     _subscriberSocket?.Dispose();
-                    _monitor?.Dispose();
                 }
 
                 disposedValue = true;
@@ -202,7 +202,7 @@ namespace Nyx.Core.Network
             // Do not change this code. Put cleanup code in Dispose(bool disposing) above.
             Dispose(true);
         }
-        #endregion
+#endregion
 
     }
 }
