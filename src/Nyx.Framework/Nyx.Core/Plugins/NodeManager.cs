@@ -128,7 +128,6 @@ namespace Nyx.Core.Plugins
             _logger = logger;
             _pluginManager = pluginManager;
             _tasker = new SerialAsyncTasker();
-            _connectedToHub = true;
             // Find the hub if its running in this app domain.
             var nyxNodes = runningNodes as IList<INyxNode> ?? runningNodes.ToList();
             _hub = nyxNodes.FirstOrDefault(n => n is INyxHub) as INyxHub;

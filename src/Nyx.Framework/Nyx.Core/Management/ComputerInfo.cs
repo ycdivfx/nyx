@@ -17,21 +17,16 @@
  * All rights reserved.
  */
 using System;
-using System.Collections.Generic;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Management;
 using System.Reactive.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using NLog;
-using Nyx.Core.Utils;
 
 namespace Nyx.Core.Management
 {
-    public class ComputerInfo : IDisposable
+    public class ComputerInfo
     {
         private string _os;
         // ReSharper disable once InconsistentNaming
@@ -43,13 +38,6 @@ namespace Nyx.Core.Management
         public ComputerInfo()
         {
             Refresh();
-            //_disposable = Observable
-            //    .Interval(TimeSpan.FromSeconds(30))
-            //    .ObserveOnPool()
-            //    .Subscribe(o =>
-            //    {
-            //        Refresh();
-            //    });
         }
 
         public void Refresh()
@@ -309,27 +297,5 @@ namespace Nyx.Core.Management
             return num;
         }
 
-        #region IDisposable Support
-        private bool _disposedValue;
-        private readonly IDisposable _disposable;
-
-        protected virtual void Dispose(bool disposing)
-        {
-            if (_disposedValue) return;
-            if (disposing)
-            {
-                _disposable?.Dispose();          
-            }
-
-            _disposedValue = true;
-        }
-
-
-        void IDisposable.Dispose()
-        {
-            // Do not change this code. Put cleanup code in Dispose(bool disposing) above.
-            Dispose(true);
-        }
-        #endregion
     }
 }

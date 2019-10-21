@@ -38,11 +38,6 @@ namespace Nyx.Core
         IObservable<MessageStatus> InMessageStream { get; }
 
         /// <summary>
-        /// Just a simple flag to check if the system is licensed.
-        /// </summary>
-        IObservable<bool> LicenseStatus { get; }
-
-        /// <summary>
         /// Broadcast a message to the SUB-PUB channel.
         /// </summary>
         /// <param name="msg">Message to broadcast.</param>

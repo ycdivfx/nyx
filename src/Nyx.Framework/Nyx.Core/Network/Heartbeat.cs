@@ -30,30 +30,28 @@ namespace Nyx.Core.Network
 {
     public sealed class Heartbeat : IDisposable
     {
-        private readonly NetMQContext _context;
         private string _address;
         private int _port;
         private int _requiresInitialisation = 1;
         private static volatile Heartbeat _instance;
         private static readonly object SyncLock = new object();
-        private NetMQActor _actor; 
+        private NetMQActor _actor;
         private readonly ISubject<ConnectionStatus> _connectionSubject;
 
-        public static Heartbeat CreateInstance(NetMQContext context, string address, int port)
+        public static Heartbeat CreateInstance(string address, int port)
         {
             if (_instance != null) return _instance;
             lock (SyncLock)
             {
-                if (_instance == null) _instance = new Heartbeat(context, address, port);
+                if (_instance == null) _instance = new Heartbeat(address, port);
             }
             return _instance;
         }
 
         public static Heartbeat Instance => _instance;
 
-        private Heartbeat(NetMQContext context, string address, int port)
+        private Heartbeat(string address, int port)
         {
-            _context = context;
             _address = address;
             _port = port;
             _connectionSubject =
@@ -80,86 +78,76 @@ namespace Nyx.Core.Network
             if (Interlocked.CompareExchange(ref _requiresInitialisation, 0, 1) == 0) return;
             _actor?.SendFrame(NetMQActor.EndShimMessage);
             _actor?.Dispose();
-            _actor = NetMQActor.Create(_context, new ShimHandler(this, _context, _connectionSubject, _address, _port));
+            _actor = NetMQActor.Create(new ShimHandler(this, _connectionSubject, _address, _port));
         }
 
         private class ShimHandler : IShimHandler, IDisposable
         {
-            private readonly NetMQContext _context;
             private readonly ISubject<ConnectionStatus> _subject;
             private readonly string _address;
             private readonly int _port;
             private readonly Heartbeat _parent;
-            private Poller _poller;
-            private readonly CompositeDisposable _disposables;
-            private NetMQTimer _timeoutTimer;
+            private NetMQPoller _poller;
             private SubscriberSocket _subscriberSocket;
             private volatile bool _borgConnected;
 
-            public ShimHandler(Heartbeat parent, NetMQContext context, ISubject<ConnectionStatus> subject, string address, int port)
+            public ShimHandler(Heartbeat parent, ISubject<ConnectionStatus> subject, string address, int port)
             {
                 _parent = parent;
-                _context = context;
                 _subject = subject;
                 _address = address;
                 _port = port;
-                _disposables = new CompositeDisposable();
             }
 
             public void Run(PairSocket shim)
             {
-                _poller = new Poller();
+                _poller = new NetMQPoller();
 
-                _disposables.Add(Observable.FromEventPattern<NetMQSocketEventArgs>(e => shim.ReceiveReady += e, e => shim.ReceiveReady -= e)
+                _ = Observable.FromEventPattern<NetMQSocketEventArgs>(e => shim.ReceiveReady += e, e => shim.ReceiveReady -= e)
                     .Select(e => e.EventArgs)
-                    .Subscribe(OnShimReady));
+                    .Subscribe(OnShimReady);
 
-                _poller.AddSocket(shim);
-                _timeoutTimer = new NetMQTimer(TimeSpan.FromSeconds(5));
+                _poller.Add(shim);
 
-                _disposables.Add(Observable.FromEventPattern<NetMQTimerEventArgs>(e => _timeoutTimer.Elapsed += e, e => _timeoutTimer.Elapsed -= e)
+                // Timer
+                var timeoutTimer = new NetMQTimer(TimeSpan.FromSeconds(5));
+                _ = Observable.FromEventPattern<NetMQTimerEventArgs>(e => timeoutTimer.Elapsed += e, e => timeoutTimer.Elapsed -= e)
                     .Select(e => e.EventArgs)
                     .ObserveOn(ThreadPoolScheduler.Instance)
-                    .Subscribe(OnTimeoutElapsed));
+                    .Subscribe(OnTimeoutElapsed);
+                _poller.Add(timeoutTimer);
 
-                _poller.AddTimer(_timeoutTimer);
-
-                _subscriberSocket = _context.CreateSubscriberSocket();
+                _subscriberSocket = new SubscriberSocket();
                 _subscriberSocket.Options.Linger = TimeSpan.Zero;
                 _subscriberSocket.Subscribe(CoreHearbeatTopic);
                 _subscriberSocket.Connect($"tcp://{_address}:{_port + 1}");
                 _subject.OnNext(ConnectionStatus.Connecting);
 
-                _disposables.Add(Observable.FromEventPattern<NetMQSocketEventArgs>(e => _subscriberSocket.ReceiveReady += e, e => _subscriberSocket.ReceiveReady -= e)
+                _ = Observable.FromEventPattern<NetMQSocketEventArgs>(e => _subscriberSocket.ReceiveReady += e, e => _subscriberSocket.ReceiveReady -= e)
                     .Select(e => e.EventArgs)
                     .Where(e => e.Socket.ReceiveFrameString() == CoreHearbeatTopic)
                     .ObserveOn(ThreadPoolScheduler.Instance)
                     .Subscribe(e =>
                     {
-                        _timeoutTimer.Reset();
+                        timeoutTimer.Reset();
                         Thread.MemoryBarrier();
                         var status = _borgConnected
                             ? (ConnectionStatus.Online | ConnectionStatus.Connected)
                             : (ConnectionStatus.Online | ConnectionStatus.Disconnected);
                         _subject.OnNext(status);
-                    }));
+                    });
 
-                _poller.AddSocket(_subscriberSocket);
-                _disposables.Add(_subscriberSocket);
-                _timeoutTimer.Reset();
+                _poller.Add(_subscriberSocket);
+                timeoutTimer.Reset();
                 shim.SignalOK();
 
-                _disposables.Add(Disposable.Create(() =>
-                {
-                    _timeoutTimer.Enable = false;
-                    _poller.Cancel();
-                }));
-                _disposables.Add(_subscriberSocket);
-
-                _poller.PollTillCancelled();
+                _poller.Run();
 
                 // Cleanup stuff after stopping
-                _disposables.Dispose();
+                _poller.Remove(_subscriberSocket);
+                _poller.Remove(timeoutTimer);
+                _poller.Remove(shim);
+                _poller.Dispose();
             }
 
             private void OnShimReady(NetMQSocketEventArgs e)
@@ -169,7 +157,7 @@ namespace Nyx.Core.Network
                 switch (cmd)
                 {
                     case NetMQActor.EndShimMessage:
-                        Dispose();
+                        _poller.Stop();
                         break;
                     case "connected":
                         Thread.MemoryBarrier();
@@ -191,14 +179,32 @@ namespace Nyx.Core.Network
                 _subject.OnNext(status);
             }
 
-            /// <summary>
-            /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
-            /// </summary>
+            #region IDisposable Support
+            private bool disposedValue = false; // To detect redundant calls
+
+            protected virtual void Dispose(bool disposing)
+            {
+                if (!disposedValue)
+                {
+                    if (disposing)
+                    {
+                        _poller?.Dispose();
+                        _subscriberSocket?.Dispose();
+                    }
+
+                    disposedValue = true;
+                }
+            }
+
+
+            // This code added to correctly implement the disposable pattern.
             public void Dispose()
             {
-                if(!_disposables.IsDisposed)
-                    _disposables.Dispose();
+                // Do not change this code. Put cleanup code in Dispose(bool disposing) above.
+                Dispose(true);
             }
+            #endregion
+
         }
 
         public IObservable<ConnectionStatus> ConnectionStatusStream => _connectionSubject.AsObservable();

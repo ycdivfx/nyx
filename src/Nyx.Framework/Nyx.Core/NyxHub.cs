@@ -44,7 +44,6 @@ namespace Nyx.Core
         private const string HubConfigMultithread = "hub_multithread.receive";
         private readonly ILogger<NyxHub> _logger;
         private Task _serverWorker;
-        private readonly NetMQContext _context;
         private readonly object _syncLock = new object();
         private bool _isStarted;
         private readonly PluginManager _plugman;
@@ -99,16 +98,6 @@ namespace Nyx.Core
 
         public IObservable<MessageStatus> InMessageStream => _inMessageStatus.AsObservable();
 
-        /// <summary>
-        /// Just a standin, we will replace this.
-        /// </summary>
-        internal IObservable<bool> LicenseSubject;
-
-        /// <summary>
-        /// Just a simple flag to check if the system is licensed.
-        /// </summary>
-        public IObservable<bool> LicenseStatus => LicenseSubject?.AsObservable();
-
         public IObservable<MessageStatus> OutMessageStream => _outMessageStatus.AsObservable();
 
         internal IObservable<Tuple<byte[], INyxMessage>> NyxMessageStream => _inMessage.AsObservable();
@@ -120,12 +109,10 @@ namespace Nyx.Core
         /// <param name="plugman">PluginManager</param>
         /// <param name="config"></param>
         public NyxHub(
-            NetMQContext context,
             ILogger<NyxHub> logger,
             PluginManager plugman,
             IConfigManager config)
         {
-            _context = context;
             _serverCancelToken = _serverCancelationSource.Token;
             config.WhenConfigChanges.Where(m => m.Keys.Contains(HubConfigMultithread)).Subscribe(ConfigReload);
             _receiveMultithread = config.Get(HubConfigMultithread, false);
@@ -223,7 +210,7 @@ namespace Nyx.Core
 
             _disposables.Add(NyxMessageStream.Subscribe(RepSocketOnReceiveReady, x => _logger.Error("Error processing stream.", x)));
             _hubActor?.Dispose();
-            _hubActor = NetMQActor.Create(_context, new HubShimHandler(_context, _inMessage, Port));
+            _hubActor = NetMQActor.Create(new HubShimHandler(_inMessage, Port));
 
             _logger.Debug("Starting hub server loop...");
             _isStarted = true;

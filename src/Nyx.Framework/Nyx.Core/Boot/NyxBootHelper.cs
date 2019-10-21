@@ -20,8 +20,8 @@ using System.ComponentModel;
 using System.Threading;
 using System.Windows.Forms;
 using Autofac;
-using NetMQ;
 using Nyx.Core.Config;
+using Nyx.Core.Extensions;
 using Nyx.Core.Logging;
 using Nyx.Core.Messaging;
 using Nyx.Core.Plugins;
@@ -38,9 +38,12 @@ namespace Nyx.Core.Boot
         internal NyxBootHelper()
         {
             Builder = new ContainerBuilder();
-            // TODO: Requires upgrade for fwd 
-            Builder.RegisterInstance(NetMQContext.Create()).SingleInstance();
-
+            Builder.RegisterAssemblyTypes(typeof(NyxBootHelper).Assembly)
+                .Where(t => t.IsSharedExtension() && !t.IsAssignableTo<PluginManager>())
+                .AsImplementedInterfaces().SingleInstance().AsSelf();
+            Builder.RegisterAssemblyTypes(typeof(NyxBootHelper).Assembly)
+                .Where(t => t.IsNonSharedExtension() && !t.IsAssignableTo<PluginManager>())
+                .AsImplementedInterfaces().InstancePerDependency().AsSelf();
             Builder.RegisterType<MessageBus>().As<IMessageBus>().SingleInstance();
             Builder.RegisterGeneric(typeof(DefaultLogger<>)).As(typeof(ILogger<>));
             Builder.RegisterType<JsonConfigManager>().As<IConfigManager>().PropertiesAutowired(PropertyWiringOptions.AllowCircularDependencies).SingleInstance();

@@ -29,6 +29,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
 using NetMQ;
+using NetMQ.Sockets;
 using Nyx.Core.Config;
 using Nyx.Core.Extensions;
 using Nyx.Core.Logging;
@@ -59,10 +60,8 @@ namespace Nyx.Core
         private bool _queueOnDisconnected;
         private readonly AutoResetEvent _serverEvent = new AutoResetEvent(false);
         private readonly AutoResetEvent _messageSendResetEvent = new AutoResetEvent(false);
-        private string _tempHubIp;
         private int _timeOut = 3000;
         private int _timeOutRetries = 5;
-        private readonly NetMQContext _context;
         private NetMQSocket _reqSocket;
         private Task _serverTask;
         private readonly IConfigManager _config;
@@ -170,12 +169,10 @@ namespace Nyx.Core
         ///     Protected default construtor for creating a new id.
         /// </summary>
         public NyxBorg(
-            NetMQContext context,
             ILogger<NyxBorg> logger,
             IConfigManager config,
             PluginManager plugman)
         {
-            _context = context;
             NodeId = Guid.NewGuid().ToString("N");
             _config = config;
             _logger = logger;
@@ -191,7 +188,7 @@ namespace Nyx.Core
             _disposables.Add(_serverCancelationSource);
 
             LoadConfig(null);
-            Heartbeat.CreateInstance(_context, _lastHubIp, _port);
+            Heartbeat.CreateInstance(_lastHubIp, _port);
             //_heartbeat = new Heartbeat(_context, _lastHubIp, _port.ToString());
             ConnectionStatusStream = Observable.Create<ConnectionStatus>(o =>
             {
@@ -318,11 +315,11 @@ namespace Nyx.Core
                 _actor = null;
                 // Store port and hub address
                 _port = port;
-                _lastHubIp = _tempHubIp = ipAddress;
+                _lastHubIp = ipAddress;
 
                 Heartbeat.Instance.Setup(_lastHubIp, _port);
                 // Create a new actor to handle the comunications from hub.
-                _actor = NetMQActor.Create(_context, BorgShimHandler.Create(_context, _nyxMessageSubject, ipAddress, port));
+                _actor = NetMQActor.Create(BorgShimHandler.Create(_nyxMessageSubject, ipAddress, port));
                 Heartbeat.Instance.Connected();
 
                 CreateServerSocket();
@@ -610,7 +607,7 @@ namespace Nyx.Core
         private void CreateServerSocket()
         {
             _reqSocket?.Dispose();
-            _reqSocket = _context.CreateRequestSocket();
+            _reqSocket = new RequestSocket();
             _reqSocket.Options.Linger = TimeSpan.Zero;
             _reqSocket.Connect($"tcp://{_lastHubIp}:{_port}");
         }

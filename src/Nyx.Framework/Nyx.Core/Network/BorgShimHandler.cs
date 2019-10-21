@@ -26,92 +26,55 @@ using NetMQ;
 using NetMQ.Monitoring;
 using NetMQ.Sockets;
 using NLog;
-using Poller = NetMQ.Poller;
 
 namespace Nyx.Core.Network
 {
     internal class BorgShimHandler : IShimHandler, IDisposable
     {
-        private readonly NetMQContext _context;
         private readonly ISubject<INyxMessage> _messageSubject;
         private readonly string _address;
         private readonly int _port;
-        private readonly CompositeDisposable _disposables;
-        private Poller _poller;
+        private NetMQPoller _poller;
         private SubscriberSocket _subscriberSocket;
         private readonly Logger _logger;
         private NetMQMonitor _monitor;
 
-        public static BorgShimHandler Create(NetMQContext context, ISubject<INyxMessage> messageSubject,
+        public static BorgShimHandler Create(ISubject<INyxMessage> messageSubject,
             string address, int port)
         {
-            return new BorgShimHandler(context, messageSubject, address, port);
+            return new BorgShimHandler(messageSubject, address, port);
         }
 
-        protected BorgShimHandler(NetMQContext context, ISubject<INyxMessage> messageSubject, string address, int port)
+        protected BorgShimHandler(ISubject<INyxMessage> messageSubject, string address, int port)
         {
-            _context = context;
             _messageSubject = messageSubject;
             _address = address;
             _port = port;
-            _disposables = new CompositeDisposable();
             _logger = LogManager.GetCurrentClassLogger();
         }
 
         void IShimHandler.Run(PairSocket shim)
         {
-            _poller = new Poller();
+            _poller = new NetMQPoller();
 
             // Listen to actor dispose
-            _disposables.Add(Observable.FromEventPattern<NetMQSocketEventArgs>(e => shim.ReceiveReady += e, e => shim.ReceiveReady -= e)
+            _ = Observable.FromEventPattern<NetMQSocketEventArgs>(e => shim.ReceiveReady += e, e => shim.ReceiveReady -= e)
                 .Select(e => e.EventArgs)
                 .ObserveOn(Scheduler.CurrentThread)
-                .Subscribe(OnShimReady));
+                .Subscribe(OnShimReady);
 
-            _poller.AddSocket(shim);
+            _poller.Add(shim);
 
-            _subscriberSocket = _context.CreateSubscriberSocket();
+            _subscriberSocket = new SubscriberSocket();
             _subscriberSocket.Options.ReceiveHighWatermark = 1000;
-            _subscriberSocket.Options.ReceiveTimeout = TimeSpan.MaxValue;
             _subscriberSocket.Options.Linger = TimeSpan.FromSeconds(2);
             _subscriberSocket.Options.TcpKeepalive = true;
             _subscriberSocket.Options.TcpKeepaliveIdle = TimeSpan.FromSeconds(5);
             _subscriberSocket.Options.TcpKeepaliveInterval = TimeSpan.FromSeconds(1);
 
-            //SetupMonitor();
-
-            _disposables.Add(Observable.FromEventPattern<NetMQSocketEventArgs>(
-                e => _subscriberSocket.ReceiveReady += e, e => _subscriberSocket.ReceiveReady -= e)
-                .Select(e => e.EventArgs)
-                .ObserveOn(Scheduler.CurrentThread)
-                .Subscribe(ReceivedMessage));
-
-            _poller.AddSocket(_subscriberSocket);
-            _disposables.Add(_subscriberSocket);
-
-            _subscriberSocket.Connect($"tcp://{_address}:{_port + 1}");
-
-            shim.SignalOK();
-
-            _disposables.Add(Disposable.Create(() => _poller?.Cancel()));
-            _disposables.Add(_subscriberSocket);
-
-            try
-            {
-                _poller.PollTillCancelled();
-            }
-            catch (Exception ex)
-            {
-                _logger.Fatal(ex, "Fatal error on NetMQ poller.");
-            }
-
-            _disposables.Dispose();
-        }
-
-        private void SetupMonitor()
-        {
-            _monitor = new NetMQMonitor(_context, _subscriberSocket, "inproc://#monitor", SocketEvents.All);
-            _disposables.Add(
+#if DEBUG
+            _monitor = new NetMQMonitor(_subscriberSocket, "inproc://#monitor", SocketEvents.All);
+            _ =
                 Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor, "Connected")
                 .Select(e => new { Event = "Connected", e })
                 .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor, nameof(_monitor.Listening)).Select(e => new { Event = "Listening", e }))
@@ -119,24 +82,50 @@ namespace Nyx.Core.Network
                 .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor, nameof(_monitor.Closed)).Select(e => new { Event = "Closed", e }))
                 .Merge(Observable.FromEventPattern<NetMQMonitorSocketEventArgs>(_monitor, nameof(_monitor.Disconnected)).Select(e => new { Event = "Disconnected", e }))
                 .Do(e => _logger.Info("Monitor socket: {0}, {1}", e.Event, e.e.EventArgs.Address))
-                .Subscribe()
-                );
-            _disposables.Add(
-                Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor, nameof(_monitor.AcceptFailed))
+                .Subscribe();
+            _ = Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor, nameof(_monitor.AcceptFailed))
                 .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor, nameof(_monitor.ConnectDelayed)))
                 .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor, nameof(_monitor.CloseFailed)))
                 .Merge(Observable.FromEventPattern<NetMQMonitorErrorEventArgs>(_monitor, nameof(_monitor.BindFailed)))
                 .Do(e => _logger.Error("Monitor error socket: {0}, {1}", e.EventArgs.ErrorCode, e.EventArgs.Address))
-                .Subscribe()
-                );
-            _disposables.Add(
-                Observable.FromEventPattern<NetMQMonitorIntervalEventArgs>(_monitor, nameof(_monitor.ConnectRetried))
+                .Subscribe();
+            _ = Observable.FromEventPattern<NetMQMonitorIntervalEventArgs>(_monitor, nameof(_monitor.ConnectRetried))
                 .Do(e => _logger.Info("Monitor retry socket: {0}, {1}", e.EventArgs.Interval, e.EventArgs.Address))
-                .Subscribe()
-                );
+                .Subscribe();
             _monitor.AttachToPoller(_poller);
+#endif
 
-            _disposables.Add(_monitor);
+            _ = Observable.FromEventPattern<NetMQSocketEventArgs>(
+                e => _subscriberSocket.ReceiveReady += e, e => _subscriberSocket.ReceiveReady -= e)
+                .Select(e => e.EventArgs)
+                .ObserveOn(Scheduler.CurrentThread)
+                .Subscribe(ReceivedMessage);
+
+            _poller.Add(_subscriberSocket);
+
+            _subscriberSocket.Connect($"tcp://{_address}:{_port + 1}");
+
+            shim.SignalOK();
+
+            try
+            {
+                _poller.Run();
+            }
+            catch (Exception ex)
+            {
+                _logger.Fatal(ex, "Fatal error on NetMQ poller.");
+            }
+
+            // Cleanup stuff after stopping
+            _poller.Remove(_subscriberSocket);
+            _poller.Remove(shim);
+            if (_monitor != null)
+            {
+                _monitor.DetachFromPoller();
+                _monitor.Dispose();
+                _monitor = null;
+            }
+            _poller.Dispose();
         }
 
         private void ReceivedMessage(NetMQSocketEventArgs e)
@@ -167,7 +156,7 @@ namespace Nyx.Core.Network
                 var cmd = msg.First.ConvertToString();
                 if (cmd == NetMQActor.EndShimMessage)
                 {
-                    Dispose();
+                    _poller?.Stop();
                     return;
                 }
                 if (msg.FrameCount <= 1) return;
@@ -189,13 +178,31 @@ namespace Nyx.Core.Network
             }
         }
 
-        /// <summary>
-        /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
-        /// </summary>
+        #region IDisposable Support
+        private bool disposedValue = false; // To detect redundant calls
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposedValue)
+            {
+                if (disposing)
+                {
+                    _poller?.Dispose();
+                    _subscriberSocket?.Dispose();
+                    _monitor?.Dispose();
+                }
+
+                disposedValue = true;
+            }
+        }
+
+        // This code added to correctly implement the disposable pattern.
         public void Dispose()
         {
-            if(!_disposables.IsDisposed)
-                _disposables.Dispose();
+            // Do not change this code. Put cleanup code in Dispose(bool disposing) above.
+            Dispose(true);
         }
+        #endregion
+
     }
 }
