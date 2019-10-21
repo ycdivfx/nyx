@@ -1,6 +1,6 @@
 # Nyx Framework and Plugins
 
-Nyx is a fast network messaging system developed to bridge DCC's. It provides a high level framework that enables broadcasting messages from a node to one or more other nodes. Inlcuded are endpoints for Houdini, 3ds Max, Maya, AE and a general Python lib that enables Nyx in an software that supports Python.
+Nyx is a fast network messaging system developed to bridge DCC's. It provides a high level framework that enables broadcasting messages from a node to one or more other nodes. Inlcuded are endpoints for Houdini, 3ds Max, Maya, AE and a general Python lib that enables Nyx in any software that supports Python.
 
 Almost everything in the Nyx system is plugable, from message actions, messaging filtering and internal services. Internally it uses Rx and NetMQ.
 
