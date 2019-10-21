@@ -75,8 +75,6 @@ namespace Nyx.Core.Plugins
         private readonly List<NodeInfo> _nodesInfo = new List<NodeInfo>();
         private readonly HashSet<string> _pushUpdates = new HashSet<string>();
         private readonly ComputerInfo _computerInfo;
-        private bool _connectedToHub = false;
-        private bool _subscribed;
         private readonly CompositeDisposable _disposables = new CompositeDisposable();
         private readonly MultipleAssignmentDisposable _subscriptionDisposable = new MultipleAssignmentDisposable();
         private readonly SerialAsyncTasker _tasker;
@@ -554,7 +552,6 @@ namespace Nyx.Core.Plugins
         {
             if (_borg == null) throw new NullReferenceException("This must run on a borg.");
             NyxMessage.Create("nyx", NodesUpdateSubscribe, _borg.NodeId).SendMessage(_borg);
-            _subscribed = true;
             _subscriptionDisposable.Disposable = _internalHubWatch
                 .Where(o => o)
                 .Throttle(TimeSpan.FromSeconds(10))

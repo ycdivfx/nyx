@@ -129,7 +129,7 @@ namespace Nyx.Core.Plugins
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error($"Error starting plugin {plugin.GetType().Name}.", ex);
+                    _logger.Error(ex, $"Error starting plugin {plugin.GetType().Name}.");
                 }
             }
         }
@@ -148,7 +148,7 @@ namespace Nyx.Core.Plugins
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error($"Error stopping plugin {plugin.GetType().Name}.", ex);
+                    _logger.Error(ex, $"Error stopping plugin {plugin.GetType().Name}.");
                     throw;
                 }
             }
@@ -366,7 +366,7 @@ namespace Nyx.Core.Plugins
             }
             catch (Exception ex)
             {
-                _logger.Error("Error executing action.", ex);
+                _logger.Error(ex, "Error executing action.");
             }
             return result;
         }
