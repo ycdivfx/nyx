@@ -1,0 +1,66 @@
+﻿<UserControl x:Class="Nyx.Common.UI.Views.LoggerView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:componentModel="clr-namespace:System.ComponentModel;assembly=WindowsBase"
+             xmlns:designer="clr-namespace:Nyx.Common.UI.Designer"
+             xmlns:behaviors="clr-namespace:Nyx.Common.UI.Behaviors"
+             xmlns:converters="clr-namespace:Nyx.Common.UI.Converters"
+             mc:Ignorable="d" 
+             d:DesignHeight="300" d:DesignWidth="700"
+             d:DataContext="{d:DesignInstance designer:DesignerLoggerViewModel, IsDesignTimeCreatable=True}">
+    <UserControl.Resources>
+        <converters:LogLevelConverter x:Key="LogLevelConverter" />
+        <CollectionViewSource x:Key="LoggerDataGridViewSource" Source="{Binding LogEvents}">
+            <CollectionViewSource.SortDescriptions>
+                <componentModel:SortDescription PropertyName="TimeStamp" Direction="Ascending" />
+            </CollectionViewSource.SortDescriptions>
+        </CollectionViewSource>
+        <Style x:Key="LogLevelStyle" TargetType="TextBlock">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Level, Converter={StaticResource LogLevelConverter}}" Value="0">
+                    <Setter Property="Foreground" Value="DarkGray"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level, Converter={StaticResource LogLevelConverter}}" Value="1">
+                    <Setter Property="Foreground" Value="Gray"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level, Converter={StaticResource LogLevelConverter}}" Value="3">
+                    <Setter Property="FontWeight" Value="SemiBold"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level, Converter={StaticResource LogLevelConverter}}" Value="4">
+                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="FontWeight" Value="Bold"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="LogLevelRowStyle" TargetType="DataGridRow">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Level, Converter={StaticResource LogLevelConverter}}" Value="3">
+                    <Setter Property="Background" Value="Yellow"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level, Converter={StaticResource LogLevelConverter}}" Value="4">
+                    <Setter Property="Background" Value="Red"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+	    <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+            <Label Margin="0,0,5,0" FontSize="9">Log level</Label>
+		    <ComboBox Margin="0,0,0,2" FontSize="9" ItemsSource="{Binding LogLevels, Mode=OneTime}"
+		              SelectedValue="{Binding SelectedLogLevel}" Width="100" Height="18" />
+        </StackPanel>
+	    <DataGrid Grid.Row="1" behaviors:DataGridBehavior.Autoscroll="True" ItemsSource="{Binding Source={StaticResource LoggerDataGridViewSource}}" AutoGenerateColumns="False" IsReadOnly="True" RowStyle="{StaticResource LogLevelRowStyle}">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Time" Width="150" CanUserReorder="True" Binding="{Binding TimeStamp, StringFormat=HH:mm:ss.fff dd.MM.yy}" ElementStyle="{StaticResource LogLevelStyle}"/>
+                <DataGridTextColumn Header="Level" Width="60" CanUserReorder="True" Binding="{Binding Level}" ElementStyle="{StaticResource LogLevelStyle}" />
+                <DataGridTextColumn Header="Message" Width="*" CanUserReorder="False" Binding="{Binding FormattedMessage}" ElementStyle="{StaticResource LogLevelStyle}"/>
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

@@ -1,0 +1,43 @@
+﻿<UserControl x:Class="Nyx.Common.UI.Views.ConnectionStatusView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:designer1="clr-namespace:Nyx.Common.UI.Designer"
+             mc:Ignorable="d" Background="DarkGray"
+             d:DataContext="{d:DesignInstance designer1:DesignerConnectionStatusView, IsDesignTimeCreatable=True}"
+             d:DesignWidth="800">
+    <UserControl.Resources>
+        <Style x:Key="HeaderStyle" TargetType="{x:Type Run}">
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+    </UserControl.Resources>
+    <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+        <TextBlock Margin="0,0,0,0">
+            <Run Text="Connection/Hub:" Style="{StaticResource HeaderStyle}" />
+            <Run Text="{Binding Status, Mode=OneWay}" />
+            <Run Text=" | " />
+            <Run Text="Sent:" Style="{StaticResource HeaderStyle}"/>
+            <Run Text="{Binding TotalSent, Mode=OneWay}" />
+            <Run Text=" | " />
+            <Run Text="Received:" Style="{StaticResource HeaderStyle}"/>
+            <Run Text="{Binding TotalReceived, Mode=OneWay}" />
+            <Run Text=" | " />
+            <Run Text="Core Version:" Style="{StaticResource HeaderStyle}"/>
+            <Run Text="{Binding NyxVersion, Mode=OneWay}" />
+        </TextBlock>
+        <ItemsControl Grid.Column="1" ItemsSource="{Binding StatusViewModels}">
+            
+        </ItemsControl>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Image Source="../Icons/tray1_icon.ico" Width="18" Height="18" ToolTip="Artur Leão (YCDIVFX)"/>
+            <Image Source="../Icons/tray3_icon.ico" Width="18" Height="18" ToolTip="Daniel Santana (YCDIVFX)"/>
+            <Image Source="../Icons/tray2_icon.ico" Width="18" Height="18" ToolTip="Jonathan de Blok (JDB Graphics)" />
+        </StackPanel>
+    </Grid>
+</UserControl>
