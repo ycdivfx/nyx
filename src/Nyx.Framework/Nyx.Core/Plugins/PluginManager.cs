@@ -59,7 +59,7 @@ namespace Nyx.Core.Plugins
         /// <paramCount name="context"></paramCount>
         internal void Init(IComponentContext context)
         {
-            // We only one "entry" point now to Nyx.
+            // We have only one "entry" point now to Nyx.
             _extensions = context.Resolve<IEnumerable<INyxExtension>>().ToList();
             // Remove non shared instances... they should not be here
             _extensions.RemoveAll(e => e.GetType().IsNonSharedExtension());
